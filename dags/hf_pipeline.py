@@ -87,13 +87,62 @@ def hf_pipeline():
         conn.close()
         return total
 
+    @task(execution_timeout=timedelta(hours=2))
+    def load_commits(dag_run=None, run_id=None, params=None):
+        day = snapshot_date(dag_run)
+        orgs = get_orgs(params)
+
+        hook = PostgresHook(postgres_conn_id="dwh")
+        conn = hook.get_conn()
+        cur = conn.cursor()
+        # коммиты берём только у открытых моделей, у которых появился новый sha
+        cur.execute(
+            """
+            select m.payload->>'_id', m.payload->>'id'
+            from stg.hf_models m
+            where m.business_date = %s
+              and m.org = any(%s)
+              and m.payload->>'gated' = 'false'
+              and not exists (
+                  select 1 from stg.hf_commits c
+                  where c.hf_id = m.payload->>'_id' and c.sha = m.payload->>'sha'
+              )
+            order by 2
+            """,
+            (day, orgs),
+        )
+        todo = cur.fetchall()
+        print("models to load commits", len(todo))
+
+        added = 0
+        for row in todo:
+            hf_id = row[0]
+            repo_id = row[1]
+            status, commits = hf_api.list_commits(repo_id)
+            if status != 200:
+                print("skip", repo_id, status)
+                continue
+            for commit in commits:
+                cur.execute(
+                    "insert into stg.hf_commits (hf_id, repo_id, sha, payload, load_id) "
+                    "values (%s, %s, %s, %s::jsonb, %s) on conflict (hf_id, sha) do nothing",
+                    (hf_id, repo_id, commit["id"], json.dumps(commit), run_id),
+                )
+                added += cur.rowcount
+            conn.commit()
+
+        cur.close()
+        conn.close()
+        print("new commits", added)
+        return added
+
     with TaskGroup("extract"):
         create_stg_tables = SQLExecuteQueryOperator(
             task_id="create_stg_tables",
             conn_id="dwh",
             sql=["stg/01_create_tables.sql", "stg/02_orgs.sql"],
         )
-        create_stg_tables >> load_license_tags() >> load_models()
+        create_stg_tables >> load_license_tags() >> load_models() >> load_commits()
 
 
 hf_pipeline()
