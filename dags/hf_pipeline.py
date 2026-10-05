@@ -24,6 +24,12 @@ def snapshot_date(dag_run):
     return dag_run.run_after.date().isoformat()
 
 
+def check_fresh_run(dag_run):
+    # снимок показывает текущее состояние, поэтому перезапуск старого запуска записал бы его под старой датой
+    if dag_run.run_after.date() != pendulum.now("UTC").date():
+        raise ValueError("this run is not from today, trigger a new run instead of clearing an old one")
+
+
 @dag(
     dag_id="hf_pipeline",
     # расписание включим, когда будет готов весь конвейер
@@ -42,6 +48,7 @@ def hf_pipeline():
 
     @task
     def load_license_tags(dag_run=None, run_id=None):
+        check_fresh_run(dag_run)
         day = snapshot_date(dag_run)
         data = hf_api.get_license_tags()
 
@@ -60,6 +67,7 @@ def hf_pipeline():
 
     @task
     def load_models(dag_run=None, run_id=None, params=None):
+        check_fresh_run(dag_run)
         day = snapshot_date(dag_run)
         orgs = get_orgs(params)
 
