@@ -136,13 +136,71 @@ def hf_pipeline():
         print("new commits", added)
         return added
 
+    @task(execution_timeout=timedelta(hours=8))
+    def load_revisions(dag_run=None, run_id=None, params=None):
+        day = snapshot_date(dag_run)
+        orgs = get_orgs(params)
+
+        hook = PostgresHook(postgres_conn_id="dwh")
+        conn = hook.get_conn()
+        cur = conn.cursor()
+        # для каждого нового коммита берём состояние карточки и файлов на этот коммит
+        cur.execute(
+            """
+            select c.hf_id, c.repo_id, c.sha
+            from stg.hf_commits c
+            where c.hf_id in (
+                select payload->>'_id' from stg.hf_models
+                where business_date = %s and org = any(%s)
+            )
+              and not exists (
+                  select 1 from stg.hf_revisions r
+                  where r.hf_id = c.hf_id and r.sha = c.sha
+              )
+            order by c.repo_id, c.sha
+            """,
+            (day, orgs),
+        )
+        todo = cur.fetchall()
+        print("revisions to load", len(todo))
+
+        done = 0
+        not_ok = 0
+        for row in todo:
+            hf_id = row[0]
+            repo_id = row[1]
+            sha = row[2]
+            status, data = hf_api.get_revision(repo_id, sha)
+            payload = None
+            if data is not None:
+                payload = json.dumps(data)
+            else:
+                # такой ответ сохраняется навсегда, поэтому пишем его в лог
+                print("revision status", repo_id, sha, status)
+                not_ok += 1
+            cur.execute(
+                "insert into stg.hf_revisions (hf_id, repo_id, sha, http_status, payload, load_id) "
+                "values (%s, %s, %s, %s, %s::jsonb, %s) on conflict (hf_id, sha) do nothing",
+                (hf_id, repo_id, sha, status, payload, run_id),
+            )
+            # сохраняем каждую ревизию сразу, чтобы после сбоя продолжить с того же места
+            conn.commit()
+            done += 1
+            if done % 500 == 0:
+                print("revisions loaded", done)
+
+        cur.close()
+        conn.close()
+        print("revisions loaded", done, "not 200", not_ok)
+        return done
+
     with TaskGroup("extract"):
         create_stg_tables = SQLExecuteQueryOperator(
             task_id="create_stg_tables",
             conn_id="dwh",
             sql=["stg/01_create_tables.sql", "stg/02_orgs.sql"],
         )
-        create_stg_tables >> load_license_tags() >> load_models() >> load_commits()
+        create_stg_tables >> load_license_tags() >> load_models() >> load_commits() >> load_revisions()
 
 
 hf_pipeline()
