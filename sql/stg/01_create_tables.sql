@@ -35,6 +35,9 @@ create table if not exists stg.hf_commits (
     unique (hf_id, sha)
 );
 
+-- порядковый номер коммита в истории модели: 1 самый первый, нужен, если у коммитов одинаковые даты
+alter table stg.hf_commits add column if not exists commit_number integer;
+
 -- состояние карточки и файлов модели на каждый коммит
 create table if not exists stg.hf_revisions (
     hf_id text not null,

@@ -123,11 +123,13 @@ def hf_pipeline():
             if status != 200:
                 print("skip", repo_id, status)
                 continue
-            for commit in commits:
+            for i, commit in enumerate(commits):
+                # API отдаёт коммиты от новых к старым, поэтому самый старый получает номер 1
+                number = len(commits) - i
                 cur.execute(
-                    "insert into stg.hf_commits (hf_id, repo_id, sha, payload, load_id) "
-                    "values (%s, %s, %s, %s::jsonb, %s) on conflict (hf_id, sha) do nothing",
-                    (hf_id, repo_id, commit["id"], json.dumps(commit), run_id),
+                    "insert into stg.hf_commits (hf_id, repo_id, sha, commit_number, payload, load_id) "
+                    "values (%s, %s, %s, %s, %s::jsonb, %s) on conflict (hf_id, sha) do nothing",
+                    (hf_id, repo_id, commit["id"], number, json.dumps(commit), run_id),
                 )
                 added += cur.rowcount
             conn.commit()
