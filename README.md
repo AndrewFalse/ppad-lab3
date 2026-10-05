@@ -139,7 +139,7 @@ docker compose down
 | `stg.hf_list_runs` | сколько страниц и моделей пришло по организации в снимке | вместе со снимком | `business_date`, `org` |
 | `stg.hf_commits` | коммит модели из `GET /api/models/{id}/commits/main` | добавляются только новые коммиты | `hf_id`, `sha` |
 | `stg.hf_revisions` | карточка и список файлов модели на коммит из `GET /api/models/{id}/revision/{sha}` | добавляются только для новых коммитов | `hf_id`, `sha` |
-| `stg.hf_base_models` | базовая модель из `cardData.base_model`, организации которой нет в охвате | добавляются только новые | `repo_id` |
+| `stg.hf_base_models` | базовая модель из `cardData.base_model`, которой нет в снимке дня: модель другой организации или переименованная либо удалённая модель из охвата | добавляются только новые | `repo_id` |
 | `stg.hf_license_tags` | справочник лицензий из `GET /api/models-tags-by-type?type=license`, `payload` вида `{"license": [...]}` | перезаписывается за день | `business_date` |
 
 Служебные поля:

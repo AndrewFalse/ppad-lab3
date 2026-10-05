@@ -231,17 +231,23 @@ def hf_pipeline():
                     if isinstance(item, str) and re.match(r"^[\w.-]+(/[\w.-]+)?$", item):
                         bases.add(item)
 
-        # модели организаций из охвата, модели из снимка дня и уже загруженные базовые модели повторно не берём
+        # модели из снимка дня и уже загруженные базовые модели повторно не берём
         cur.execute("select org from stg.hf_orgs")
         scope = set(row[0] for row in cur.fetchall())
+        cur.execute("select org from stg.hf_list_runs where business_date = %s", (day,))
+        snapshot_orgs = set(row[0] for row in cur.fetchall())
         cur.execute("select payload->>'id' from stg.hf_models where business_date = %s", (day,))
         in_snapshot = set(row[0] for row in cur.fetchall())
         cur.execute("select repo_id from stg.hf_base_models")
         loaded = set(row[0] for row in cur.fetchall())
         todo = []
         for base in sorted(bases - in_snapshot - loaded):
-            if base.split("/")[0] not in scope:
-                todo.append(base)
+            org = base.split("/")[0]
+            # модель из охвата придёт со снимком своей организации, если его сегодня ещё нет
+            # если снимок есть, а модели в нём нет, её переименовали или удалили, такую загружаем
+            if org in scope and org not in snapshot_orgs:
+                continue
+            todo.append(base)
         print("base models to load", len(todo))
 
         for repo_id in todo:
