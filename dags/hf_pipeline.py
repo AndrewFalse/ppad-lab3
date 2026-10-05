@@ -96,7 +96,7 @@ def hf_pipeline():
         hook = PostgresHook(postgres_conn_id="dwh")
         conn = hook.get_conn()
         cur = conn.cursor()
-        # коммиты берём только у открытых моделей, у которых появился новый sha
+        # коммиты берём только у открытых моделей вне группы quant, у которых появился новый sha
         cur.execute(
             """
             select m.payload->>'_id', m.payload->>'id'
@@ -104,6 +104,7 @@ def hf_pipeline():
             where m.business_date = %s
               and m.org = any(%s)
               and m.payload->>'gated' = 'false'
+              and m.org not in (select org from stg.hf_orgs where stratum = 'quant')
               and not exists (
                   select 1 from stg.hf_commits c
                   where c.hf_id = m.payload->>'_id' and c.sha = m.payload->>'sha'
@@ -218,16 +219,21 @@ def hf_pipeline():
                 value = [value]
             if isinstance(value, list):
                 for item in value:
-                    # в карточке бывает что угодно, берём только имена вида org/name
+                    # в карточке бывает что угодно, берём только имена вида name или org/name
                     if isinstance(item, str) and re.match(r"^[\w.-]+(/[\w.-]+)?$", item):
                         bases.add(item)
 
-        # модели из снимка дня и уже загруженные базовые модели повторно не берём
+        # модели организаций из охвата, модели из снимка дня и уже загруженные базовые модели повторно не берём
+        cur.execute("select org from stg.hf_orgs")
+        scope = set(row[0] for row in cur.fetchall())
         cur.execute("select payload->>'id' from stg.hf_models where business_date = %s", (day,))
         in_snapshot = set(row[0] for row in cur.fetchall())
         cur.execute("select repo_id from stg.hf_base_models")
         loaded = set(row[0] for row in cur.fetchall())
-        todo = sorted(bases - in_snapshot - loaded)
+        todo = []
+        for base in sorted(bases - in_snapshot - loaded):
+            if base.split("/")[0] not in scope:
+                todo.append(base)
         print("base models to load", len(todo))
 
         for repo_id in todo:

@@ -1,4 +1,5 @@
--- Охват: крупные лаборатории (labs) и российские организации и авторы (ru)
+-- Охват: крупные лаборатории (labs), российские организации и авторы (ru)
+-- и перераспространители квантизованных копий (quant), по ним берём только снимок без истории коммитов
 -- это наша настройка, а не данные источника, поэтому source = seed
 create table if not exists stg.hf_orgs (
     org text not null,
@@ -7,7 +8,7 @@ create table if not exists stg.hf_orgs (
     loaded_at timestamptz default now()
 );
 
-truncate stg.hf_orgs;
+delete from stg.hf_orgs;
 
 insert into stg.hf_orgs (org, stratum) values
     ('meta-llama', 'labs'),
@@ -27,4 +28,6 @@ insert into stg.hf_orgs (org, stratum) values
     ('MTSAIR', 'ru'),
     ('Vikhrmodels', 'ru'),
     ('IlyaGusev', 'ru'),
-    ('cointegrated', 'ru');
+    ('cointegrated', 'ru'),
+    ('unsloth', 'quant'),
+    ('bartowski', 'quant');
