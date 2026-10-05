@@ -110,6 +110,32 @@ services:
       airflow-init:
         condition: service_completed_successfully
 
+  metabase:
+    image: metabase/metabase:v0.63.19.1
+    environment:
+      # настройки и дашборды храним в postgres, а не во встроенной H2
+      MB_DB_TYPE: postgres
+      MB_DB_HOST: postgres
+      MB_DB_PORT: 5432
+      MB_DB_DBNAME: metabase
+      MB_DB_USER: metabase
+      MB_DB_PASS: ${METABASE_DB_PASSWORD:?}
+      MB_ENCRYPTION_SECRET_KEY: ${MB_ENCRYPTION_SECRET_KEY:?}
+      MB_SESSION_SECRET_KEY: ${MB_SESSION_SECRET_KEY:?}
+      JAVA_OPTS: -Xmx1g
+    ports:
+      - "127.0.0.1:3333:3000"
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail -s http://localhost:3000/api/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 120s
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
+
 volumes:
   pgdata:
   airflow-logs:
