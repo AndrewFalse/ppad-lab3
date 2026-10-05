@@ -1,4 +1,5 @@
 import json
+import re
 from datetime import timedelta
 
 import pendulum
@@ -194,13 +195,62 @@ def hf_pipeline():
         print("revisions loaded", done, "not 200", not_ok)
         return done
 
+    @task
+    def load_base_models(dag_run=None, run_id=None, params=None):
+        day = snapshot_date(dag_run)
+        orgs = get_orgs(params)
+
+        hook = PostgresHook(postgres_conn_id="dwh")
+        conn = hook.get_conn()
+        cur = conn.cursor()
+
+        # base_model в карточке бывает строкой или списком
+        cur.execute(
+            "select payload->'cardData'->'base_model' from stg.hf_models where business_date = %s and org = any(%s)",
+            (day, orgs),
+        )
+        bases = set()
+        for row in cur.fetchall():
+            value = row[0]
+            if isinstance(value, str):
+                value = [value]
+            if isinstance(value, list):
+                for item in value:
+                    # в карточке бывает что угодно, берём только имена вида org/name
+                    if isinstance(item, str) and re.match(r"^[\w.-]+(/[\w.-]+)?$", item):
+                        bases.add(item)
+
+        # модели из снимка дня и уже загруженные базовые модели повторно не берём
+        cur.execute("select payload->>'id' from stg.hf_models where business_date = %s", (day,))
+        in_snapshot = set(row[0] for row in cur.fetchall())
+        cur.execute("select repo_id from stg.hf_base_models")
+        loaded = set(row[0] for row in cur.fetchall())
+        todo = sorted(bases - in_snapshot - loaded)
+        print("base models to load", len(todo))
+
+        for repo_id in todo:
+            status, data = hf_api.get_model(repo_id)
+            payload = None
+            if data is not None:
+                payload = json.dumps(data)
+            cur.execute(
+                "insert into stg.hf_base_models (repo_id, http_status, payload, load_id) "
+                "values (%s, %s, %s::jsonb, %s) on conflict (repo_id) do nothing",
+                (repo_id, status, payload, run_id),
+            )
+            conn.commit()
+
+        cur.close()
+        conn.close()
+        return len(todo)
+
     with TaskGroup("extract"):
         create_stg_tables = SQLExecuteQueryOperator(
             task_id="create_stg_tables",
             conn_id="dwh",
             sql=["stg/01_create_tables.sql", "stg/02_orgs.sql"],
         )
-        create_stg_tables >> load_license_tags() >> load_models() >> load_commits() >> load_revisions()
+        create_stg_tables >> load_license_tags() >> load_models() >> load_commits() >> load_revisions() >> load_base_models()
 
 
 hf_pipeline()
