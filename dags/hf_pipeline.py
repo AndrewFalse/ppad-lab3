@@ -317,6 +317,14 @@ def hf_pipeline():
         if rows[0][0] > 0:
             errors.append("revisions without commit")
 
+        # payload заполнен ровно у ответов с кодом 200
+        rows = hook.get_records(
+            "select (select count(*) from stg.hf_revisions where (http_status = 200) <> (payload is not null)) "
+            "+ (select count(*) from stg.hf_base_models where (http_status = 200) <> (payload is not null))"
+        )
+        if rows[0][0] > 0:
+            errors.append("payload does not match http status")
+
         rows = hook.get_records(
             """
             select
@@ -331,6 +339,28 @@ def hf_pipeline():
         stats = rows[0]
         print("models", stats[0], "commits", stats[1], "revisions", stats[2],
               "revisions not 200", stats[3], "base models", stats[4])
+
+        # эти счётчики не роняют проверку, но показывают, всё ли догрузилось
+        rows = hook.get_records(
+            """
+            select
+                (select count(*) from stg.hf_models m
+                 where m.business_date = %s
+                   and m.org = any(%s)
+                   and m.payload->>'gated' = 'false'
+                   and m.org not in (select org from stg.hf_orgs where stratum = 'quant')
+                   and not exists (select 1 from stg.hf_commits c
+                                   where c.hf_id = m.payload->>'_id' and c.sha = m.payload->>'sha')),
+                (select count(*) from stg.hf_commits c
+                 where not exists (select 1 from stg.hf_revisions r
+                                   where r.hf_id = c.hf_id and r.sha = c.sha)),
+                (select count(*) from stg.hf_base_models where http_status <> 200)
+            """,
+            parameters=(day, orgs),
+        )
+        late = rows[0]
+        print("open models without head commit", late[0], "commits without revision", late[1],
+              "base models not 200", late[2])
 
         if errors:
             raise ValueError("; ".join(errors))

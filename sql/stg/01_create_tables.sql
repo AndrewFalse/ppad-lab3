@@ -11,6 +11,7 @@ create table if not exists stg.hf_models (
 );
 
 create index if not exists hf_models_date_org on stg.hf_models (business_date, org);
+create unique index if not exists hf_models_date_id on stg.hf_models (business_date, (payload->>'_id'));
 
 -- журнал снимков: сколько страниц и моделей пришло по организации
 create table if not exists stg.hf_list_runs (
@@ -22,6 +23,8 @@ create table if not exists stg.hf_list_runs (
     load_id text,
     loaded_at timestamptz default now()
 );
+
+create unique index if not exists hf_list_runs_date_org on stg.hf_list_runs (business_date, org);
 
 -- коммиты моделей, hf_id это стабильный _id модели
 create table if not exists stg.hf_commits (
@@ -70,3 +73,5 @@ create table if not exists stg.hf_license_tags (
     load_id text,
     loaded_at timestamptz default now()
 );
+
+create unique index if not exists hf_license_tags_date on stg.hf_license_tags (business_date);
