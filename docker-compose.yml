@@ -1,0 +1,29 @@
+name: ppad-lab3
+
+services:
+  postgres:
+    image: postgres:16.15-bookworm
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
+      POSTGRES_DB: postgres
+      AIRFLOW_DB_PASSWORD: ${AIRFLOW_DB_PASSWORD:?}
+      METABASE_DB_PASSWORD: ${METABASE_DB_PASSWORD:?}
+      DWH_ETL_PASSWORD: ${DWH_ETL_PASSWORD:?}
+      DWH_BI_PASSWORD: ${DWH_BI_PASSWORD:?}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./sql/init:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "127.0.0.1:15432:5432"
+    # через -h 127.0.0.1, иначе проверка пройдёт ещё во время init
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U $${POSTGRES_USER} -d postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    restart: always
+
+volumes:
+  pgdata:
