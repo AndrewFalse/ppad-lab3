@@ -9,7 +9,7 @@ HEADERS = {"User-Agent": "ppad-lab3 student project (https://github.com/AndrewFa
 # поля списка моделей, которые сохраняем в stg
 MODEL_FIELDS = [
     "cardData", "gated", "tags", "sha", "lastModified", "createdAt",
-    "pipeline_tag", "library_name", "disabled", "private", "downloads", "likes",
+    "pipeline_tag", "library_name", "disabled", "private", "downloads", "likes", "siblings",
 ]
 
 # поля состояния модели на конкретный коммит
@@ -40,7 +40,7 @@ def get(url, params=None):
             time.sleep(reset + 1)
             continue
 
-        if response.status_code >= 500:
+        if response.status_code >= 500 or response.status_code == 408:
             print("server error", response.status_code)
             time.sleep(10 * attempt)
             continue
