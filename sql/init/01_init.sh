@@ -16,6 +16,8 @@ create database de owner etl;
 revoke connect on database airflow from public;
 revoke connect on database metabase from public;
 revoke connect on database de from public;
+revoke temporary on database de from public;
+revoke connect, temporary on database postgres from public;
 grant connect on database de to bi_reader;
 EOSQL
 
@@ -23,6 +25,9 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname de <<EOSQL
 create schema stg authorization etl;
 create schema dds authorization etl;
 create schema cdm authorization etl;
+
+-- схема public не нужна никому, кроме владельца базы
+revoke all on schema public from public;
 
 -- BI видит только витрины
 grant usage on schema cdm to bi_reader;
