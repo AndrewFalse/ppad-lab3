@@ -244,13 +244,88 @@ def hf_pipeline():
         conn.close()
         return len(todo)
 
+    # проверку не повторяем: если данные плохие, повтор ничего не исправит
+    @task(retries=0)
+    def check_stg(dag_run=None, params=None):
+        day = snapshot_date(dag_run)
+        orgs = get_orgs(params)
+        hook = PostgresHook(postgres_conn_id="dwh")
+        errors = []
+
+        # по каждой организации есть непустой снимок за день
+        rows = hook.get_records(
+            "select org, models from stg.hf_list_runs where business_date = %s",
+            parameters=(day,),
+        )
+        loaded = {}
+        for row in rows:
+            loaded[row[0]] = row[1]
+        for org in orgs:
+            if loaded.get(org, 0) == 0:
+                errors.append("no snapshot for " + org)
+
+        # число моделей в снимке совпадает с журналом загрузки
+        rows = hook.get_records(
+            """
+            select r.org
+            from stg.hf_list_runs r
+            left join stg.hf_models m on m.business_date = r.business_date and m.org = r.org
+            where r.business_date = %s
+            group by r.org, r.models
+            having r.models <> count(m.payload)
+            """,
+            parameters=(day,),
+        )
+        for row in rows:
+            errors.append("snapshot size mismatch for " + row[0])
+
+        # одна модель встречается в снимке один раз
+        rows = hook.get_records(
+            "select count(*) from (select payload->>'_id' from stg.hf_models "
+            "where business_date = %s group by 1 having count(*) > 1) t",
+            parameters=(day,),
+        )
+        if rows[0][0] > 0:
+            errors.append("duplicate models in snapshot")
+
+        # у каждого коммита есть дата
+        rows = hook.get_records("select count(*) from stg.hf_commits where payload->>'date' is null")
+        if rows[0][0] > 0:
+            errors.append("commits without date")
+
+        # у каждой ревизии есть свой коммит
+        rows = hook.get_records(
+            "select count(*) from stg.hf_revisions r where not exists "
+            "(select 1 from stg.hf_commits c where c.hf_id = r.hf_id and c.sha = r.sha)"
+        )
+        if rows[0][0] > 0:
+            errors.append("revisions without commit")
+
+        rows = hook.get_records(
+            """
+            select
+                (select count(*) from stg.hf_models where business_date = %s),
+                (select count(*) from stg.hf_commits),
+                (select count(*) from stg.hf_revisions),
+                (select count(*) from stg.hf_revisions where http_status <> 200),
+                (select count(*) from stg.hf_base_models)
+            """,
+            parameters=(day,),
+        )
+        stats = rows[0]
+        print("models", stats[0], "commits", stats[1], "revisions", stats[2],
+              "revisions not 200", stats[3], "base models", stats[4])
+
+        if errors:
+            raise ValueError("; ".join(errors))
+
     with TaskGroup("extract"):
         create_stg_tables = SQLExecuteQueryOperator(
             task_id="create_stg_tables",
             conn_id="dwh",
             sql=["stg/01_create_tables.sql", "stg/02_orgs.sql"],
         )
-        create_stg_tables >> load_license_tags() >> load_models() >> load_commits() >> load_revisions() >> load_base_models()
+        create_stg_tables >> load_license_tags() >> load_models() >> load_commits() >> load_revisions() >> load_base_models() >> check_stg()
 
 
 hf_pipeline()
