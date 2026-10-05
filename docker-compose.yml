@@ -1,6 +1,6 @@
 name: ppad-lab3
 
-# Урезанный официальный docker-compose Airflow 3.3.2: LocalExecutor вместо Celery, без redis и worker
+# Урезанный официальный docker-compose Airflow 3.3.2: LocalExecutor вместо Celery, без redis, worker, triggerer и flower
 x-airflow-common: &airflow-common
   image: apache/airflow:3.3.2
   environment: &airflow-common-env
