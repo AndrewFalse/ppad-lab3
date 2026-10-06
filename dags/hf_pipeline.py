@@ -4,7 +4,7 @@ import re
 from datetime import timedelta
 
 import pendulum
-from airflow.sdk import dag, task, Param, TaskGroup
+from airflow.sdk import dag, task, Param, TaskGroup, CronTriggerTimetable
 from airflow.providers.common.sql.operators.sql import SQLExecuteQueryOperator, SQLCheckOperator
 from airflow.providers.standard.operators.empty import EmptyOperator
 from airflow.providers.postgres.hooks.postgres import PostgresHook
@@ -61,8 +61,8 @@ def check_fresh_run(dag_run):
 
 @dag(
     dag_id="hf_pipeline",
-    # расписание включим, когда будет готов весь конвейер
-    schedule=None,
+    # каждый день в 03:00 UTC, это 06:00 по Москве; дата снимка это дата запуска
+    schedule=CronTriggerTimetable("0 3 * * *", timezone="UTC"),
     start_date=pendulum.datetime(2026, 10, 1, tz="UTC"),
     catchup=False,
     max_active_runs=1,
