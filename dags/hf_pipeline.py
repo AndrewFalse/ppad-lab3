@@ -1,13 +1,42 @@
 import json
+import os
 import re
 from datetime import timedelta
 
 import pendulum
 from airflow.sdk import dag, task, Param, TaskGroup
-from airflow.providers.common.sql.operators.sql import SQLExecuteQueryOperator
+from airflow.providers.common.sql.operators.sql import SQLExecuteQueryOperator, SQLCheckOperator
+from airflow.providers.standard.operators.empty import EmptyOperator
 from airflow.providers.postgres.hooks.postgres import PostgresHook
 
 import hf_api
+
+
+SQL_DIR = "/opt/airflow/sql"
+
+
+def sql_files(folder):
+    # файлы слоя выполняются по порядку имён: 01_..., 02_...
+    path = os.path.join(SQL_DIR, folder)
+    if not os.path.isdir(path):
+        return []
+    names = []
+    for name in sorted(os.listdir(path)):
+        if name.endswith(".sql"):
+            names.append(name)
+    return names
+
+
+def chain_sql_files(folder, check=False):
+    # задачи слоя идут друг за другом, имя задачи это имя файла без .sql
+    previous = EmptyOperator(task_id="start")
+    for name in sql_files(folder):
+        if check:
+            step = SQLCheckOperator(task_id=name[:-4], conn_id="dwh", sql=folder + "/" + name, retries=0)
+        else:
+            step = SQLExecuteQueryOperator(task_id=name[:-4], conn_id="dwh", sql=folder + "/" + name)
+        previous >> step
+        previous = step
 
 
 def get_orgs(params):
@@ -371,13 +400,26 @@ def hf_pipeline():
         if errors:
             raise ValueError("; ".join(errors))
 
-    with TaskGroup("extract"):
+    with TaskGroup("extract") as extract_group:
         create_stg_tables = SQLExecuteQueryOperator(
             task_id="create_stg_tables",
             conn_id="dwh",
             sql=["stg/01_create_tables.sql", "stg/02_orgs.sql"],
         )
         create_stg_tables >> load_license_tags() >> load_models() >> load_commits() >> load_revisions() >> load_base_models() >> check_stg()
+
+    # роль 2 кладёт sql/dds/*.sql и проверки sql/dq/*.sql, роль 3 кладёт sql/cdm/*.sql
+    with TaskGroup("dds") as dds_group:
+        chain_sql_files("dds")
+
+    # проверка возвращает одну строку, все значения в ней должны быть true
+    with TaskGroup("dq") as dq_group:
+        chain_sql_files("dq", check=True)
+
+    with TaskGroup("cdm") as cdm_group:
+        chain_sql_files("cdm")
+
+    extract_group >> dds_group >> dq_group >> cdm_group
 
 
 hf_pipeline()
